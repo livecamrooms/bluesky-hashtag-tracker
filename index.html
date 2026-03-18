@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Bluesky Top 50 Hashtags • Live</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+        
+        :root {
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --text: #1f2937;
+            --accent: #3b82f6;
+        }
+        
+        body {
+            margin: 0;
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 600;
+            margin: 0;
+            color: #111827;
+        }
+        
+        .subtitle {
+            color: #6b7280;
+            font-size: 1rem;
+        }
+        
+        .status-bar {
+            background: var(--card);
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            font-size: 0.95rem;
+        }
+        
+        .live-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #22c55e;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+            margin-right: 8px;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        table {
+            width: 100%;
+            background: var(--card);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            border-collapse: collapse;
+        }
+        
+        th {
+            background: #f1f5f9;
+            padding: 16px 20px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #64748b;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        tr:hover {
+            background: #f8fafc;
+        }
+        
+        .hashtag {
+            font-weight: 600;
+            color: var(--accent);
+            text-decoration: none;
+            font-size: 1.1rem;
+        }
+        
+        .hashtag:hover {
+            text-decoration: underline;
+        }
+        
+        .uses {
+            font-weight: 600;
+            color: #111827;
+            font-size: 1.05rem;
+        }
+        
+        .action-btn {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .action-btn:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #64748b;
+            font-size: 0.85rem;
+        }
+        
+        .reset-btn {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .connecting {
+            color: #64748b;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔥 Bluesky Top 50 Hashtags</h1>
+            <p class="subtitle">Real-time • Counts only posts containing the tag • Data resets on page reload</p>
+        </header>
+
+        <div class="status-bar">
+            <div>
+                <span id="status" class="connecting">Connecting to Bluesky Jetstream...</span>
+            </div>
+            <div>
+                Posts processed: <strong id="postCount">0</strong>
+            </div>
+            <div>
+                <button onclick="resetData()" class="reset-btn">Reset All Data</button>
+            </div>
+        </div>
+
+        <table id="hashtagTable">
+            <thead>
+                <tr>
+                    <th># Hashtag</th>
+                    <th>Uses</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <!-- Populated by JavaScript -->
+            </tbody>
+        </table>
+
+        <div class="footer">
+            <p>Built as a simplified recreation • Powered by Bluesky's public Jetstream firehose<br>
+            Open this file in any browser • No account or server needed • Data starts fresh when you load the page</p>
+        </div>
+    </div>
+
+    <script>
+        // ============== CONFIG ==============
+        const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post";
+        
+        // ============== STATE ==============
+        let ws = null;
+        let hashtagMap = new Map();     // hashtag (lowercase) → count
+        let totalPosts = 0;
+        let updateInterval = null;
+        
+        // ============== HASHTAG EXTRACTION ==============
+        function extractHashtags(text) {
+            if (!text || typeof text !== 'string') return [];
+            // Matches # followed by word characters (supports most common hashtags)
+            const regex = /#([a-zA-Z0-9_]{1,50})/gi;
+            const matches = text.match(regex) || [];
+            // Normalize to lowercase and remove duplicates per post
+            const unique = [...new Set(matches.map(tag => tag.substring(1).toLowerCase()))];
+            return unique;
+        }
+        
+        // ============== RENDER TABLE ==============
+        function renderTop50() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+            
+            // Get top 50 by uses (descending)
+            const sorted = Array.from(hashtagMap.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 50);
+            
+            if (sorted.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = `<td colspan="3" style="text-align:center; padding:40px; color:#64748b;">Waiting for data from the firehose... (usually appears within 10-30 seconds)</td>`;
+                tbody.appendChild(row);
+                return;
+            }
+            
+            sorted.forEach(([tag, uses]) => {
+                const row = document.createElement('tr');
+                
+                const searchUrl = `https://bsky.app/search?q=%23${encodeURIComponent(tag)}`;
+                
+                row.innerHTML = `
+                    <td>
+                        <a href="${searchUrl}" target="_blank" class="hashtag">#${tag}</a>
+                    </td>
+                    <td class="uses">${uses.toLocaleString()}</td>
+                    <td style="text-align: right;">
+                        <a href="${searchUrl}" target="_blank" class="action-btn">View on Bluesky →</a>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+        
+        // ============== WEBSOCKET HANDLER ==============
+        function connectToFirehose() {
+            const statusEl = document.getElementById('status');
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            statusEl.textContent = "Connecting to Bluesky Jetstream...";
+            statusEl.style.color = "#64748b";
+            
+            ws = new WebSocket(JETSTREAM_URL);
+            
+            ws.onopen = () => {
+                statusEl.innerHTML = `<span class="live-dot"></span> LIVE • Connected to firehose`;
+                statusEl.style.color = "#22c55e";
+                console.log('%c✅ Connected to Bluesky Jetstream', 'color:#22c55e; font-weight:bold');
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    // Only care about new post creations
+                    if (data.kind === 'commit' &&
+                        data.commit?.collection === 'app.bsky.feed.post' &&
+                        data.commit.operation === 'create') {
+                        
+                        const record = data.commit.record;
+                        if (record && record.text) {
+                            const tags = extractHashtags(record.text);
+                            
+                            tags.forEach(tag => {
+                                const current = hashtagMap.get(tag) || 0;
+                                hashtagMap.set(tag, current + 1);
+                            });
+                            
+                            totalPosts++;
+                            document.getElementById('postCount').textContent = totalPosts.toLocaleString();
+                        }
+                    }
+                } catch (e) {
+                    // Ignore malformed messages
+                }
+            };
+            
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+                statusEl.textContent = "Connection error – retrying...";
+                statusEl.style.color = "#ef4444";
+            };
+            
+            ws.onclose = () => {
+                statusEl.textContent = "Disconnected – reconnecting in 3s...";
+                setTimeout(connectToFirehose, 3000);
+            };
+        }
+        
+        // ============== RESET ==============
+        function resetData() {
+            if (!confirm("Reset all data and start fresh?")) return;
+            
+            hashtagMap.clear();
+            totalPosts = 0;
+            document.getElementById('postCount').textContent = '0';
+            renderTop50();
+        }
+        
+        // ============== START EVERYTHING ==============
+        function startApp() {
+            // Initial render
+            renderTop50();
+            
+            // Auto-update table every 800ms (smooth but not too aggressive)
+            updateInterval = setInterval(renderTop50, 800);
+            
+            // Connect to live firehose
+            connectToFirehose();
+            
+            // Keyboard shortcut for reset (R key)
+            document.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'r' && e.ctrlKey) {
+                    e.preventDefault();
+                    resetData();
+                }
+            });
+        }
+        
+        // Boot the app
+        window.onload = startApp;
+    </script>
+</body>
+</html>
