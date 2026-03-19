@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bluesky Top 50 Hashtags • Live + Engagement</title>
+    <title>Simple Bluesky Top 50 Hashtags • Live</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
         
@@ -23,7 +23,7 @@
         }
         
         .container {
-            max-width: 1100px;
+            max-width: 900px;
             margin: 40px auto;
             padding: 20px;
         }
@@ -49,7 +49,7 @@
             background: var(--card);
             padding: 16px 24px;
             border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -77,13 +77,13 @@
             background: var(--card);
             border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
             border-collapse: collapse;
         }
         
         th {
             background: #f1f5f9;
-            padding: 16px 12px;
+            padding: 16px 20px;
             text-align: left;
             font-weight: 600;
             font-size: 0.9rem;
@@ -92,7 +92,7 @@
         }
         
         td {
-            padding: 16px 12px;
+            padding: 16px 20px;
             border-bottom: 1px solid #e2e8f0;
         }
         
@@ -107,9 +107,11 @@
             font-size: 1.1rem;
         }
         
-        .hashtag:hover { text-decoration: underline; }
+        .hashtag:hover {
+            text-decoration: underline;
+        }
         
-        .num {
+        .uses {
             font-weight: 600;
             color: #111827;
             font-size: 1.05rem;
@@ -119,9 +121,9 @@
             background: var(--accent);
             color: white;
             border: none;
-            padding: 8px 14px;
+            padding: 8px 16px;
             border-radius: 8px;
-            font-size: 0.85rem;
+            font-size: 0.9rem;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -148,23 +150,17 @@
             font-weight: 500;
         }
         
-        .connecting { color: #64748b; font-style: italic; }
-        
-        .note {
-            background: #fef3c7;
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin: 16px 0;
-            font-size: 0.95rem;
-            color: #92400e;
+        .connecting {
+            color: #64748b;
+            font-style: italic;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🔥 Bluesky Top 50 Hashtags + Engagement</h1>
-            <p class="subtitle">Real-time uses, replies & reposts • Resets on reload</p>
+            <h1>🔥 Bluesky Top 50 Hashtags</h1>
+            <p class="subtitle">Real-time • Counts only posts containing the tag • Data resets on page reload</p>
         </header>
 
         <div class="status-bar">
@@ -176,191 +172,153 @@
             </div>
         </div>
 
-        <div class="note">
-        </div>
-
         <table id="hashtagTable">
             <thead>
                 <tr>
                     <th># Hashtag</th>
                     <th>Uses</th>
-                    <th>Replies</th>
-                    <th>Reposts</th>
-                    <th>Engagement</th>
                     <th style="text-align: right;">Action</th>
                 </tr>
             </thead>
-            <tbody id="tableBody"></tbody>
+            <tbody id="tableBody">
+                <!-- Populated by JavaScript -->
+            </tbody>
         </table>
 
         <div class="footer">
-            <p>Simplified client-side tool • Powered by Bluesky Jetstream firehose<br>
-            No server, no login • Engagement is approximate (live only, misses likes)</p>
+            <p>Built as a simplified recreation • Powered by Bluesky's public Jetstream firehose<br>
+            Open this file in any browser • No account or server needed • Data starts fresh when you load the page</p>
         </div>
     </div>
 
     <script>
-        // CONFIG
-        const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post,app.bsky.feed.like,app.bsky.feed.repost";
-
-        // STATE
+        // ============== CONFIG ==============
+        const JETSTREAM_URL = "wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post";
+        
+        // ============== STATE ==============
         let ws = null;
-        let hashtagStats = new Map(); // tag (lowercase) → {uses: number, replies: number, reposts: number, posts: Set<uri>}
-        let uriToTags = new Map();    // post uri → Set<tags> (for quick lookup on like/repost/reply)
+        let hashtagMap = new Map();     // hashtag (lowercase) → count
         let updateInterval = null;
-
-        // HELPERS
+        
+        // ============== HASHTAG EXTRACTION ==============
         function extractHashtags(text) {
             if (!text || typeof text !== 'string') return [];
             const regex = /#([a-zA-Z0-9_]{1,50})/gi;
             const matches = text.match(regex) || [];
-            return [...new Set(matches.map(tag => tag.substring(1).toLowerCase()))];
+            const unique = [...new Set(matches.map(tag => tag.substring(1).toLowerCase()))];
+            return unique;
         }
-
-        function getOrCreateStats(tag) {
-            if (!hashtagStats.has(tag)) {
-                hashtagStats.set(tag, {uses: 0, replies: 0, reposts: 0, posts: new Set()});
-            }
-            return hashtagStats.get(tag);
-        }
-
+        
+        // ============== RENDER TABLE ==============
         function renderTop50() {
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
-
-            const sorted = Array.from(hashtagStats.entries())
-                .map(([tag, stats]) => ({
-                    tag,
-                    uses: stats.uses,
-                    replies: stats.replies,
-                    reposts: stats.reposts,
-                    engagement: stats.replies + stats.reposts
-                }))
-                .sort((a, b) => b.engagement - a.engagement || b.uses - a.uses)
+            
+            const sorted = Array.from(hashtagMap.entries())
+                .sort((a, b) => b[1] - a[1])
                 .slice(0, 50);
-
+            
             if (sorted.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:40px; color:#64748b;">Waiting for firehose data... (usually starts in 10-30s)</td></tr>`;
+                const row = document.createElement('tr');
+                row.innerHTML = `<td colspan="3" style="text-align:center; padding:40px; color:#64748b;">Waiting for data from the firehose... (usually appears within 10-30 seconds)</td>`;
+                tbody.appendChild(row);
                 return;
             }
-
-            sorted.forEach(({tag, uses, replies, reposts, engagement}) => {
-                const searchUrl = `https://bsky.app/search?q=%23${encodeURIComponent(tag)}`;
+            
+            sorted.forEach(([tag, uses]) => {
                 const row = document.createElement('tr');
+                const searchUrl = `https://bsky.app/search?q=%23${encodeURIComponent(tag)}`;
+                
                 row.innerHTML = `
-                    <td><a href="${searchUrl}" target="_blank" class="hashtag">#${tag}</a></td>
-                    <td class="num">${uses.toLocaleString()}</td>
-                    <td class="num">${replies.toLocaleString()}</td>
-                    <td class="num">${reposts.toLocaleString()}</td>
-                    <td class="num">${engagement.toLocaleString()}</td>
+                    <td>
+                        <a href="${searchUrl}" target="_blank" class="hashtag">#${tag}</a>
+                    </td>
+                    <td class="uses">${uses.toLocaleString()}</td>
                     <td style="text-align: right;">
-                        <a href="${searchUrl}" target="_blank" class="action-btn">View →</a>
+                        <a href="${searchUrl}" target="_blank" class="action-btn">View on Bluesky →</a>
                     </td>
                 `;
                 tbody.appendChild(row);
             });
         }
-
-        // WEBSOCKET
-        function connect() {
-            const status = document.getElementById('status');
-            if (ws) ws.close();
-
-            status.textContent = "Connecting to Jetstream...";
-            status.style.color = "#64748b";
-
+        
+        // ============== WEBSOCKET HANDLER ==============
+        function connectToFirehose() {
+            const statusEl = document.getElementById('status');
+            
+            if (ws) {
+                ws.close();
+            }
+            
+            statusEl.textContent = "Connecting to Bluesky Jetstream...";
+            statusEl.style.color = "#64748b";
+            
             ws = new WebSocket(JETSTREAM_URL);
-
+            
             ws.onopen = () => {
-                status.innerHTML = `<span class="live-dot"></span> LIVE • Connected`;
-                status.style.color = "#22c55e";
+                statusEl.innerHTML = `<span class="live-dot"></span> LIVE • Connected to firehose`;
+                statusEl.style.color = "#22c55e";
+                console.log('%c✅ Connected to Bluesky Jetstream', 'color:#22c55e; font-weight:bold');
             };
-
+            
             ws.onmessage = (event) => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.kind !== 'commit' || data.commit?.operation !== 'create') return;
-
-                    const coll = data.commit.collection;
-                    const record = data.commit.record;
-
-                    if (coll === 'app.bsky.feed.post') {
-                        if (!record?.text) return;
-                        const tags = extractHashtags(record.text);
-                        if (tags.length === 0) return;
-
-                        const uri = data.commit.uri; // at://did:plc:xxx/app.bsky.feed.post/3l...
-
-                        tags.forEach(tag => {
-                            const stats = getOrCreateStats(tag);
-                            stats.uses++;
-                            stats.posts.add(uri);
-                        });
-
-                        uriToTags.set(uri, new Set(tags));
+                    
+                    if (data.kind === 'commit' &&
+                        data.commit?.collection === 'app.bsky.feed.post' &&
+                        data.commit.operation === 'create') {
+                        
+                        const record = data.commit.record;
+                        if (record && record.text) {
+                            const tags = extractHashtags(record.text);
+                            
+                            tags.forEach(tag => {
+                                const current = hashtagMap.get(tag) || 0;
+                                hashtagMap.set(tag, current + 1);
+                            });
+                        }
                     }
-                    else if (coll === 'app.bsky.feed.like' || coll === 'app.bsky.feed.repost') {
-                        const subjectUri = record.subject?.uri;
-                        if (!subjectUri) return;
-
-                        const tags = uriToTags.get(subjectUri);
-                        if (!tags) return; // we didn't see the original post → ignore
-
-                        const incr = coll === 'app.bsky.feed.like' ? null : (coll === 'app.bsky.feed.repost' ? 'reposts' : null);
-                        if (!incr) return; // we ignore likes for now
-
-                        tags.forEach(tag => {
-                            const stats = hashtagStats.get(tag);
-                            if (stats) stats[incr]++;
-                        });
-                    }
-                    else if (coll === 'app.bsky.feed.post' && record.reply?.parent?.uri) {
-                        // reply to a post
-                        const parentUri = record.reply.parent.uri;
-                        const tags = uriToTags.get(parentUri);
-                        if (!tags) return;
-
-                        tags.forEach(tag => {
-                            const stats = hashtagStats.get(tag);
-                            if (stats) stats.replies++;
-                        });
-                    }
-                } catch (e) {}
+                } catch (e) {
+                    // Ignore malformed messages
+                }
             };
-
-            ws.onerror = () => {
-                status.textContent = "Connection error – retrying...";
-                status.style.color = "#ef4444";
+            
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+                statusEl.textContent = "Connection error – retrying...";
+                statusEl.style.color = "#ef4444";
             };
-
+            
             ws.onclose = () => {
-                status.textContent = "Disconnected – reconnecting in 3s...";
-                setTimeout(connect, 3000);
+                statusEl.textContent = "Disconnected – reconnecting in 3s...";
+                setTimeout(connectToFirehose, 3000);
             };
         }
-
+        
+        // ============== RESET ==============
         function resetData() {
-            if (!confirm("Reset everything?")) return;
-            hashtagStats.clear();
-            uriToTags.clear();
+            if (!confirm("Reset all data and start fresh?")) return;
+            
+            hashtagMap.clear();
             renderTop50();
         }
-
-        // START
-        function init() {
+        
+        // ============== START EVERYTHING ==============
+        function startApp() {
             renderTop50();
-            updateInterval = setInterval(renderTop50, 1200); // ~every 1.2s
-            connect();
-
-            document.addEventListener('keydown', e => {
+            updateInterval = setInterval(renderTop50, 800);
+            connectToFirehose();
+            
+            document.addEventListener('keydown', (e) => {
                 if (e.key.toLowerCase() === 'r' && e.ctrlKey) {
                     e.preventDefault();
                     resetData();
                 }
             });
         }
-
-        window.onload = init;
+        
+        window.onload = startApp;
     </script>
 </body>
 </html>
